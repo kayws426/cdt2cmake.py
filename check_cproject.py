@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import os
+import sys
 from typing import List, Set, Tuple, Dict
 import xml.etree.ElementTree as elemTree
 from lxml import objectify
@@ -8,7 +9,7 @@ from lxml import objectify
 __version__ = "0.0.1"
 
 def debug_print(msg, *args):
-    return print(msg, *args)
+    return # print(msg, *args)
 
 
 class config_info:
@@ -70,6 +71,96 @@ class config_info:
         return tool_options
 
 
+class cmake_gerator:
+    target_filename = 'CMakeLists.txt'
+    target_dir = '.'
+    variable_dict = None
+
+    def set_gen_target_dir(self, path: str) -> None:
+        self.target_dir = path
+
+    def gether_vaiable(self, config: config_info) -> None:
+        if self.variable_dict is None:
+            self.variable_dict ={}
+            self.variable_dict['${ProjName}'] = config['PROJECT_NAME']
+            self.variable_dict['${workspace_loc}'] = config['PROJECT_DIR'] + '/..'
+            self.variable_dict['${PROJECT_ROOT}'] = config['PROJECT_DIR']
+            self.variable_dict['${PROJECT_LOC}'] = config['PROJECT_DIR']
+            # debug_print('variable_dict', self.variable_dict)
+
+    def expand_variable(self, text: str) -> str:
+        if text[0] == '"' and text[-1] == '"' and text.count('"') == 2:
+            text = text[1:-1]
+        if text[-1] == '}' and ':' in text:
+            tmp = text.split(':')
+            text = tmp[0] + '}' + tmp[1][0:-1]
+        for k,v in self.variable_dict.items():
+            text = text.replace(k, v)
+        return text
+    
+    def get_src_files(self, config: config_info, current_target_name: str) -> List[str]:
+        return ['a.c', 'b.c']
+
+    def generate(self, config_name: str, config: config_info) -> None:
+        self.gether_vaiable(config)
+        outfile = open(os.path.join(self.target_dir, self.target_filename), "w")
+        # outfile = sys.stdout
+
+        config_info = config['config_info']
+        current_target_name = config['PROJECT_NAME']
+
+        outfile.write('cmake_minimum_required(VERSION 3.5)\n')
+
+        outfile.write('\n')
+        outfile.write(f'project({current_target_name})\n')
+
+        outfile.write('\n')
+        outfile.write('set(CG_TOOL_ROOT "C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.1.LTS")\n')
+
+        SRC_FILES = self.get_src_files(config, current_target_name)
+
+        if SRC_FILES is not None and len(SRC_FILES) > 0:
+            outfile.write(f'\nadd_executable({current_target_name}')
+            for src_file in SRC_FILES:
+                outfile.write(f"\n\t{src_file}")
+            outfile.write(')\n')
+
+            if hasattr(config_info, 'COMPILER_OPTIONS') and len(config_info.COMPILER_OPTIONS['DEFINE_SUBITEMS']) > 0:
+                outfile.write(f"\ntarget_compile_definitions({current_target_name} PUBLIC")
+                for item in config_info.COMPILER_OPTIONS['DEFINE_SUBITEMS']:
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outfile.write(f"\n\t{item_str}")
+                outfile.write(')\n')
+
+            if hasattr(config_info, 'COMPILER_OPTIONS') and len(config_info.COMPILER_OPTIONS['INCLUDE_PATH_SUBITEMS']) > 0:
+                outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC")
+                for item in config_info.COMPILER_OPTIONS['INCLUDE_PATH_SUBITEMS']:
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outfile.write(f"\n\t{item_str}")
+                outfile.write(')\n')
+
+            if hasattr(config_info, 'LINKER_OPTIONS') and len(config_info.LINKER_OPTIONS['SEARCH_PATH_SUBITEMS']) > 0:
+                outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC")
+                for item in config_info.LINKER_OPTIONS['SEARCH_PATH_SUBITEMS']:
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outfile.write(f"\n\t{item_str}")
+                outfile.write(')\n')
+
+            if hasattr(config_info, 'LINKER_OPTIONS') and len(config_info.LINKER_OPTIONS['LIBRARY_SUBITEMS']) > 0:
+                outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC")
+                for item in config_info.LINKER_OPTIONS['LIBRARY_SUBITEMS']:
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outfile.write(f"\n\t{item_str}")
+                outfile.write(')\n')
+
+            #
+        #
+
+
 def get_project_name(PROJECT_DIR: str) -> str:
     project_filepath = os.path.join(PROJECT_DIR, ".project")
     project_xml = elemTree.parse(project_filepath)
@@ -79,6 +170,8 @@ def get_project_name(PROJECT_DIR: str) -> str:
 
 
 def get_configs(PROJECT_DIR: str) -> Dict:
+    proj_name = get_project_name(PROJECT_DIR)
+
     cproject_filepath = os.path.join(PROJECT_DIR, ".cproject")
     cproject_xml = elemTree.parse(cproject_filepath)
 
@@ -88,6 +181,8 @@ def get_configs(PROJECT_DIR: str) -> Dict:
         config_name = config_node.attrib['name']
         configs[config_name] = {k:v for k,v in config_node.attrib.items()}  # copy atributes
         configs[config_name]['config_info'] = config_info(config_node)
+        configs[config_name]['PROJECT_NAME'] = proj_name
+        configs[config_name]['PROJECT_DIR'] = PROJECT_DIR
     return configs
 
 
@@ -97,13 +192,17 @@ def main():
     else:
         PROJECT_DIR = "."
 
-    proj_name = get_project_name(PROJECT_DIR)
-    print(f"-- proj name: {proj_name}")
-
     configs = get_configs(PROJECT_DIR)
+    # for config_name, config in configs.items():
+    #     print(f"-- proj name: {config['PROJECT_NAME']}")
+    #     print(f"  -- config: {config_name} (artifactName: {config['artifactName']})")
+    #     print(f"    -- {config}")
+
+    # generate
     for config_name, config in configs.items():
-        print(f"  -- config: {config_name} (artifactName: {config['artifactName']})")
-        print(f"    -- {config}")
+        generator = cmake_gerator()
+        generator.generate(config_name, config)
+        break
 
 
 if __name__ == "__main__":
