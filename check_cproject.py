@@ -14,6 +14,11 @@ def debug_print(msg, *args):
 
 class config_info:
     def __init__(self, node=None):
+        self.OPT_CODEGEN_VERSION = {}
+        self.OPT_TAGS = {}
+        self.COMPILER_OPTIONS = {}
+        self.LINKER_OPTIONS = {}
+        self.HEX_OPTIONS = {}
         if node:
             self.parse(node)
 
@@ -26,30 +31,29 @@ class config_info:
             # parse toolChain/option
             for option in toolChain.findall('./option'):
                 if "OPT_CODEGEN_VERSION" in option.attrib['id']:
-                    self.OPT_CODEGEN_VERSION = option.attrib['value']
-                    debug_print("** self.OPT_CODEGEN_VERSION:",  self.OPT_CODEGEN_VERSION)
+                    self.OPT_CODEGEN_VERSION[option.attrib['id']] = option.attrib['value']
+                    debug_print("** self.OPT_CODEGEN_VERSION:", self.OPT_CODEGEN_VERSION)
                 if "OPT_TAGS" in option.attrib['id']:
-                    self.OPT_TAGS = {}
                     for listoptval in option.findall('listOptionValue'):
                         items = listoptval.attrib['value'].split('=')
                         self.OPT_TAGS[items[0]] = items[1]
-                    debug_print("** self.OPT_TAGS:",  self.OPT_TAGS)
+                    debug_print("** self.OPT_TAGS:", self.OPT_TAGS)
 
             self.TOOLCHAIN_OPTIONS = self.parse_tool_options(toolChain)
-            debug_print("** self.TOOLCHAIN_OPTIONS:",  self.TOOLCHAIN_OPTIONS)
+            debug_print("** self.TOOLCHAIN_OPTIONS:", self.TOOLCHAIN_OPTIONS)
 
             # parse toolChain/tool
             for tool in toolChain.findall('./tool'):
                 tool_id_temp = tool.attrib['id'].lower()
                 if "compiler" in tool_id_temp:
-                    self.COMPILER_OPTIONS = self.parse_tool_options(tool)
-                    debug_print("** self.COMPILER_OPTIONS:",  self.COMPILER_OPTIONS)
+                    self.COMPILER_OPTIONS[tool.attrib['id']] = self.parse_tool_options(tool)
+                    debug_print("** self.COMPILER_OPTIONS:", self.COMPILER_OPTIONS)
                 if "linker" in tool_id_temp:
-                    self.LINKER_OPTIONS = self.parse_tool_options(tool)
-                    debug_print("** self.LINKER_OPTIONS:",  self.LINKER_OPTIONS)
+                    self.LINKER_OPTIONS[tool.attrib['id']] = self.parse_tool_options(tool)
+                    debug_print("** self.LINKER_OPTIONS:", self.LINKER_OPTIONS)
                 if "hex" in tool_id_temp:
-                    self.HEX_OPTIONS = self.parse_tool_options(tool)
-                    debug_print("** self.HEX_OPTIONS:",  self.HEX_OPTIONS)
+                    self.HEX_OPTIONS[tool.attrib['id']] = self.parse_tool_options(tool)
+                    debug_print("** self.HEX_OPTIONS:", self.HEX_OPTIONS)
 
     @staticmethod
     def parse_tool_options(tool_node) -> Dict:
@@ -91,20 +95,32 @@ class cmake_gerator:
     def expand_variable(self, text: str) -> str:
         if text[0] == '"' and text[-1] == '"' and text.count('"') == 2:
             text = text[1:-1]
+
+        if '${workspace_loc:/${ProjName}' in text and text[-1] == '}':
+            text = text[0:-1].replace('${workspace_loc:/${ProjName}', '${PROJECT_LOC}')
+
         if text[-1] == '}' and ':' in text:
             tmp = text.split(':')
             text = tmp[0] + '}' + tmp[1][0:-1]
+
         for k,v in self.variable_dict.items():
             text = text.replace(k, v)
+
         return text
     
     def get_src_files(self, config: config_info, current_target_name: str) -> List[str]:
-        return ['a.c', 'b.c']
+        start_dir = config['PROJECT_DIR']
+        file_list = []
+        # start walk dir into start_dir and gether files with ['.c', '.asm'] extention
+        for root, dirs, files in os.walk(start_dir):
+            for file in files:
+                if file.endswith('.c') or file.endswith('.asm'):
+                    if "CMake" not in file and "CompilerId." not in file:
+                        file_list.append(os.path.join(root, file).replace('\\','/'))
+        return file_list
 
-    def generate(self, config_name: str, config: config_info) -> None:
+    def generate(self, config_name: str, config: config_info, outfile) -> None:
         self.gether_vaiable(config)
-        outfile = open(os.path.join(self.target_dir, self.target_filename), "w")
-        # outfile = sys.stdout
 
         config_info = config['config_info']
         current_target_name = config['PROJECT_NAME']
@@ -117,45 +133,74 @@ class cmake_gerator:
         outfile.write('\n')
         outfile.write('set(CG_TOOL_ROOT "C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.1.LTS")\n')
 
+        outfile.write('\n')
+        outfile.write('add_compile_options(-v28 -ml -mt --cla_support=cla1 --float_support=fpu32 --tmu_support=tmu0 --vcu_support=vcu2 -O0 --fp_mode=relaxed)\n')
+
         SRC_FILES = self.get_src_files(config, current_target_name)
 
         if SRC_FILES is not None and len(SRC_FILES) > 0:
             outfile.write(f'\nadd_executable({current_target_name}')
             for src_file in SRC_FILES:
                 outfile.write(f"\n\t{src_file}")
-            outfile.write(')\n')
+            outfile.write('\n)\n')
 
-            if hasattr(config_info, 'COMPILER_OPTIONS') and len(config_info.COMPILER_OPTIONS['DEFINE_SUBITEMS']) > 0:
-                outfile.write(f"\ntarget_compile_definitions({current_target_name} PUBLIC")
-                for item in config_info.COMPILER_OPTIONS['DEFINE_SUBITEMS']:
+            for tool_id, tool_options in config_info.COMPILER_OPTIONS.items():
+                outstrlist = []
+                for item in (tool_options.get('symbols_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outfile.write(f"\n\t{item_str}")
-                outfile.write(')\n')
-
-            if hasattr(config_info, 'COMPILER_OPTIONS') and len(config_info.COMPILER_OPTIONS['INCLUDE_PATH_SUBITEMS']) > 0:
-                outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC")
-                for item in config_info.COMPILER_OPTIONS['INCLUDE_PATH_SUBITEMS']:
+                    outstrlist.append(f"\n\t{item_str}")
+                for item in (tool_options.get('DEFINE_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outfile.write(f"\n\t{item_str}")
-                outfile.write(')\n')
+                    outstrlist.append(f"\n\t{item_str}")
+                if len(outstrlist) > 0:
+                    outfile.write(f"\ntarget_compile_definitions({current_target_name} PUBLIC")
+                    outfile.write(''.join(outstrlist))
+                    outfile.write('\n)\n')
 
-            if hasattr(config_info, 'LINKER_OPTIONS') and len(config_info.LINKER_OPTIONS['SEARCH_PATH_SUBITEMS']) > 0:
-                outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC")
-                for item in config_info.LINKER_OPTIONS['SEARCH_PATH_SUBITEMS']:
+                outstrlist = []
+                for item in (tool_options.get('paths_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outfile.write(f"\n\t{item_str}")
-                outfile.write(')\n')
-
-            if hasattr(config_info, 'LINKER_OPTIONS') and len(config_info.LINKER_OPTIONS['LIBRARY_SUBITEMS']) > 0:
-                outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC")
-                for item in config_info.LINKER_OPTIONS['LIBRARY_SUBITEMS']:
+                    outstrlist.append(f"\n\t{item_str}")
+                for item in (tool_options.get('INCLUDE_PATH_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outfile.write(f"\n\t{item_str}")
-                outfile.write(')\n')
+                    outstrlist.append(f"\n\t{item_str}")
+                if len(outstrlist) > 0:
+                    outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC")
+                    outfile.write(''.join(outstrlist))
+                    outfile.write('\n)\n')
+
+            for tool_id, tool_options in config_info.LINKER_OPTIONS.items():
+                outstrlist = []
+                for item in (tool_options.get('paths_SUBITEMS') or []):
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outstrlist.append(f"\n\t{item_str}")
+                for item in (tool_options.get('SEARCH_PATH_SUBITEMS') or []):
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outstrlist.append(f"\n\t{item_str}")
+                if len(outstrlist) > 0:
+                    outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC")
+                    outfile.write(''.join(outstrlist))
+                    outfile.write('\n)\n')
+
+                outstrlist = []
+                for item in (tool_options.get('input_SUBITEMS') or []):
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outstrlist.append(f"\n\t{item_str}")
+                for item in (tool_options.get('LIBRARY_SUBITEMS') or []):
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outstrlist.append(f"\n\t{item_str}")
+                if len(outstrlist) > 0:
+                    outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC")
+                    outfile.write(''.join(outstrlist))
+                    outfile.write('\n)\n')
 
             #
         #
@@ -199,9 +244,11 @@ def main():
     #     print(f"    -- {config}")
 
     # generate
+    outfile = open('CMakeLists.txt', "w")
+    # outfile = sys.stdout
     for config_name, config in configs.items():
         generator = cmake_gerator()
-        generator.generate(config_name, config)
+        generator.generate(config_name, config, outfile)
         break
 
 
