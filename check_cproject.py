@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import io
 import os
 import sys
 from typing import List, Set, Tuple, Dict
@@ -75,7 +76,73 @@ class config_info:
         return tool_options
 
 
-class cmake_gerator:
+class cdt_project:
+    PROJECT_DIR = '.'
+    WORKSPACE_DIR = '..'
+    configs = {}
+    srcs = []
+    project_xml = None
+    cproject_xml = None
+    ccsproject_xml = None
+
+    def _get_project_xml(self):
+        if self.project_xml is None:
+            project_filepath = os.path.join(self.PROJECT_DIR, ".project")
+            self.project_xml = elemTree.parse(project_filepath)
+        return self.project_xml
+
+    def _get_cproject_xml(self):
+        if self.cproject_xml is None:
+            cproject_filepath = os.path.join(self.PROJECT_DIR, ".cproject")
+            self.cproject_xml = elemTree.parse(cproject_filepath)
+        return self.cproject_xml
+
+    def __init__(self, PROJECT_DIR: str, WORKSPACE_DIR: str = None):
+        WORKSPACE_DIR = WORKSPACE_DIR or os.path.join(PROJECT_DIR, '..')
+        self.PROJECT_DIR = PROJECT_DIR
+        self.WORKSPACE_DIR = WORKSPACE_DIR
+        self.srcs = self.get_srcs()
+        self.configs = self.get_configs()
+
+    def get_project_name(self) -> str:
+        project_xml = self._get_project_xml()
+        name_node = project_xml.find("./name")
+        return name_node.text
+
+    def get_srcs(self) -> str:
+        project_xml = self._get_project_xml()
+        srcs = []
+        linked_resources = project_xml.find("./linkedResources")
+        for resource in linked_resources:
+            uri = resource.find('locationURI')
+            srcs.append(uri.text.strip())
+            # print(uri.text.strip())
+        self.srcs = srcs
+
+    def get_configs(self) -> Dict:
+        proj_name = self.get_project_name()
+
+        cproject_filepath = os.path.join(self.PROJECT_DIR, ".cproject")
+        cproject_xml = elemTree.parse(cproject_filepath)
+
+        configs = {}
+        config_nodes = cproject_xml.findall(".//storageModule[@moduleId='cdtBuildSystem']/configuration[@name]")
+        for config_node in config_nodes:
+            config_name = config_node.attrib['name']
+            configs[config_name] = {k:v for k,v in config_node.attrib.items()}  # copy atributes
+            configs[config_name]['config_info'] = config_info(config_node)
+            configs[config_name]['PROJECT_NAME'] = proj_name
+            configs[config_name]['PROJECT_DIR'] = self.PROJECT_DIR
+
+        # for config_name, config in configs.items():
+        #     print(f"-- proj name: {config['PROJECT_NAME']}")
+        #     print(f"  -- config: {config_name} (artifactName: {config['artifactName']})")
+        #     print(f"    -- {config}")
+
+        return configs
+
+
+class cmake_generator:
     target_filename = 'CMakeLists.txt'
     target_dir = '.'
     variable_dict = None
@@ -206,48 +273,20 @@ class cmake_gerator:
         #
 
 
-def get_project_name(PROJECT_DIR: str) -> str:
-    project_filepath = os.path.join(PROJECT_DIR, ".project")
-    project_xml = elemTree.parse(project_filepath)
-    name_node = project_xml.find("./name")
-    proj_name = name_node.text
-    return proj_name
-
-
-def get_configs(PROJECT_DIR: str) -> Dict:
-    proj_name = get_project_name(PROJECT_DIR)
-
-    cproject_filepath = os.path.join(PROJECT_DIR, ".cproject")
-    cproject_xml = elemTree.parse(cproject_filepath)
-
-    configs = {}
-    config_nodes = cproject_xml.findall(".//storageModule[@moduleId='cdtBuildSystem']/configuration[@name]")
-    for config_node in config_nodes:
-        config_name = config_node.attrib['name']
-        configs[config_name] = {k:v for k,v in config_node.attrib.items()}  # copy atributes
-        configs[config_name]['config_info'] = config_info(config_node)
-        configs[config_name]['PROJECT_NAME'] = proj_name
-        configs[config_name]['PROJECT_DIR'] = PROJECT_DIR
-    return configs
-
-
 def main():
     if len(os.sys.argv) > 1 and len(os.sys.argv[1]) > 0:
         PROJECT_DIR = os.sys.argv[1]
     else:
         PROJECT_DIR = "."
 
-    configs = get_configs(PROJECT_DIR)
-    # for config_name, config in configs.items():
-    #     print(f"-- proj name: {config['PROJECT_NAME']}")
-    #     print(f"  -- config: {config_name} (artifactName: {config['artifactName']})")
-    #     print(f"    -- {config}")
+    cdt_prj = cdt_project(PROJECT_DIR)
 
     # generate
     outfile = open('CMakeLists.txt', "w")
     # outfile = sys.stdout
-    for config_name, config in configs.items():
-        generator = cmake_gerator()
+
+    for config_name, config in cdt_prj.configs.items():
+        generator = cmake_generator()
         generator.generate(config_name, config, outfile)
         break
 
