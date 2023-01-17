@@ -13,6 +13,19 @@ def debug_print(msg, *args):
     return # print(msg, *args)
 
 
+def normalize_path(path: str):
+    if path[0] == '"' and path[-1] == '"' and path.count('"') == 2:
+        path = path[1:-1]
+    path = path.replace('\\', '/')
+    path = path.replace('//', '/')
+    path = path.replace('/./', '/')
+    if path.startswith('./'):
+        path = path[2:]
+    if ' ' in path:
+        path = f'"{path}"'
+    return path
+
+
 class config_info:
     def __init__(self, node=None):
         self.OPT_CODEGEN_VERSION = {}
@@ -79,8 +92,11 @@ class config_info:
 class cdt_project:
     PROJECT_DIR = '.'
     WORKSPACE_DIR = '..'
+    PROJECT_NAME = 'unkown_project'
     configs = {}
-    srcs = []
+    SRCS = []
+    variable_dict0 = []
+    variable_dict = []
     project_xml = None
     cproject_xml = None
     ccsproject_xml = None
@@ -99,29 +115,31 @@ class cdt_project:
 
     def __init__(self, PROJECT_DIR: str, WORKSPACE_DIR: str = None):
         WORKSPACE_DIR = WORKSPACE_DIR or os.path.join(PROJECT_DIR, '..')
-        self.PROJECT_DIR = PROJECT_DIR
-        self.WORKSPACE_DIR = WORKSPACE_DIR
-        self.srcs = self.get_srcs()
-        self.configs = self.get_configs()
+        self.PROJECT_DIR = normalize_path(PROJECT_DIR)
+        self.WORKSPACE_DIR = normalize_path(WORKSPACE_DIR)
+        #
+        self.PROJECT_NAME = self._get_project_name()
+        self._gether_vaiable()
+        self.configs = self._get_configs()
+        self.SRCS = self._get_srcs()
 
-    def get_project_name(self) -> str:
+    def _get_project_name(self) -> str:
         project_xml = self._get_project_xml()
         name_node = project_xml.find("./name")
         return name_node.text
 
-    def get_srcs(self) -> str:
+    def _get_srcs(self) -> List[str]:
         project_xml = self._get_project_xml()
         srcs = []
         linked_resources = project_xml.find("./linkedResources")
         for resource in linked_resources:
             uri = resource.find('locationURI')
-            srcs.append(uri.text.strip())
-            # print(uri.text.strip())
-        self.srcs = srcs
+            file_path = self.expand_variable(uri.text.strip())
+            file_path = normalize_path(file_path)
+            srcs.append(file_path)
+        return srcs
 
-    def get_configs(self) -> Dict:
-        proj_name = self.get_project_name()
-
+    def _get_configs(self) -> Dict:
         cproject_filepath = os.path.join(self.PROJECT_DIR, ".cproject")
         cproject_xml = elemTree.parse(cproject_filepath)
 
@@ -131,7 +149,7 @@ class cdt_project:
             config_name = config_node.attrib['name']
             configs[config_name] = {k:v for k,v in config_node.attrib.items()}  # copy atributes
             configs[config_name]['config_info'] = config_info(config_node)
-            configs[config_name]['PROJECT_NAME'] = proj_name
+            configs[config_name]['PROJECT_NAME'] = self.PROJECT_NAME
             configs[config_name]['PROJECT_DIR'] = self.PROJECT_DIR
 
         # for config_name, config in configs.items():
@@ -141,22 +159,23 @@ class cdt_project:
 
         return configs
 
+    def _gether_vaiable(self) -> None:
+        if len(self.variable_dict0) == 0:
+            self.variable_dict0 = {}
+            for N in range(1, 21):
+                PARENT_N_PROJECT_LOC = normalize_path(os.path.join(self.PROJECT_DIR, '.', '../' * N))
+                self.variable_dict0[f'PARENT-{N}-PROJECT_LOC'] = PARENT_N_PROJECT_LOC
+                PARENT_N_WORKSPACE_LOC = normalize_path(os.path.join(self.WORKSPACE_DIR, '.', '../' * N))
+                self.variable_dict0[f'PARENT-{N}-WORKSPACE_LOC'] = PARENT_N_WORKSPACE_LOC
 
-class cmake_generator:
-    target_filename = 'CMakeLists.txt'
-    target_dir = '.'
-    variable_dict = None
-
-    def set_gen_target_dir(self, path: str) -> None:
-        self.target_dir = path
-
-    def gether_vaiable(self, config: config_info) -> None:
-        if self.variable_dict is None:
-            self.variable_dict ={}
-            self.variable_dict['${ProjName}'] = config['PROJECT_NAME']
-            self.variable_dict['${workspace_loc}'] = config['PROJECT_DIR'] + '/..'
-            self.variable_dict['${PROJECT_ROOT}'] = config['PROJECT_DIR']
-            self.variable_dict['${PROJECT_LOC}'] = config['PROJECT_DIR']
+        if len(self.variable_dict) == 0:
+            self.variable_dict = {}
+            self.variable_dict['ProjName'] = self.PROJECT_NAME
+            self.variable_dict['workspace_loc'] = self.WORKSPACE_DIR
+            self.variable_dict['WORKSPACE_ROOT'] = self.WORKSPACE_DIR
+            self.variable_dict['WORKSPACE_LOC'] = self.WORKSPACE_DIR
+            self.variable_dict['PROJECT_ROOT'] = self.PROJECT_DIR
+            self.variable_dict['PROJECT_LOC'] = self.PROJECT_DIR
             # debug_print('variable_dict', self.variable_dict)
 
     def expand_variable(self, text: str) -> str:
@@ -170,6 +189,40 @@ class cmake_generator:
             tmp = text.split(':')
             text = tmp[0] + '}' + tmp[1][0:-1]
 
+        for k,v in self.variable_dict0.items():
+            text = text.replace(f'${{{k}}}', v)
+            text = text.replace(k, v)
+
+        for k,v in self.variable_dict.items():
+            text = text.replace(f'${{{k}}}', v)
+            text = text.replace(k, v)
+
+        return text
+
+
+class cmake_generator:
+    target_filename = 'CMakeLists.txt'
+    target_dir = '.'
+    variable_dict = None
+
+    def __init__(self, cdt_prj: cdt_project):
+        self.cdt_prj = cdt_prj
+
+    def set_gen_target_dir(self, path: str) -> None:
+        self.target_dir = path
+
+    def gether_vaiable(self, config: config_info) -> None:
+        if self.variable_dict is None:
+            self.variable_dict ={}
+            # self.variable_dict['${ProjName}'] = config['PROJECT_NAME']
+            # self.variable_dict['${workspace_loc}'] = config['PROJECT_DIR'] + '/..'
+            # self.variable_dict['${PROJECT_ROOT}'] = config['PROJECT_DIR']
+            # self.variable_dict['${PROJECT_LOC}'] = config['PROJECT_DIR']
+            # debug_print('variable_dict', self.variable_dict)
+
+    def expand_variable(self, text: str) -> str:
+        text = self.cdt_prj.expand_variable(text)
+
         for k,v in self.variable_dict.items():
             text = text.replace(k, v)
 
@@ -177,16 +230,19 @@ class cmake_generator:
     
     def get_src_files(self, config: config_info, current_target_name: str) -> List[str]:
         start_dir = config['PROJECT_DIR']
-        file_list = []
+        file_list = self.cdt_prj.SRCS
         # start walk dir into start_dir and gether files with ['.c', '.asm'] extention
         for root, dirs, files in os.walk(start_dir):
             for file in files:
                 if file.endswith('.c') or file.endswith('.asm'):
                     if "CMake" not in file and "CompilerId." not in file:
-                        file_list.append(os.path.join(root, file).replace('\\','/'))
+                        file_path = os.path.join(root, file)
+                        file_path = normalize_path(file_path)
+                        file_list.append(file_path)
         return file_list
 
-    def generate(self, config_name: str, config: config_info, outfile) -> None:
+    def generate(self, config_name: str, outfile) -> None:
+        config = self.cdt_prj.configs.get(config_name)
         self.gether_vaiable(config)
 
         config_info = config['config_info']
@@ -286,8 +342,8 @@ def main():
     # outfile = sys.stdout
 
     for config_name, config in cdt_prj.configs.items():
-        generator = cmake_generator()
-        generator.generate(config_name, config, outfile)
+        generator = cmake_generator(cdt_prj)
+        generator.generate(config_name, outfile)
         break
 
 
