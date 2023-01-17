@@ -7,7 +7,7 @@ from typing import List, Set, Tuple, Dict
 import xml.etree.ElementTree as elemTree
 from lxml import objectify
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 def debug_print(msg, *args):
     return # print(msg, *args)
@@ -38,7 +38,9 @@ class config_info:
 
     def parse(self, config_node):
         self.name = config_node.attrib['name']
-        toolChain = config_node.find('.//toolChain')
+        folderInfo = config_node.find('.//folderInfo')
+
+        toolChain = folderInfo.find('.//toolChain')
         if toolChain:
             self.toolChain = {k:v for k,v in toolChain.attrib.items()}  # copy atributes
 
@@ -56,6 +58,10 @@ class config_info:
             self.TOOLCHAIN_OPTIONS = self.parse_tool_options(toolChain)
             debug_print("** self.TOOLCHAIN_OPTIONS:", self.TOOLCHAIN_OPTIONS)
 
+            targetPlatform = toolChain.find('./targetPlatform')
+            self.TARGETPLATFORM = {k:v for k,v in targetPlatform.attrib.items()}  # copy atributes
+            debug_print("** self.TARGETPLATFORM:", self.TARGETPLATFORM)
+
             # parse toolChain/tool
             for tool in toolChain.findall('./tool'):
                 tool_id_temp = tool.attrib['id'].lower()
@@ -69,10 +75,34 @@ class config_info:
                     self.HEX_OPTIONS[tool.attrib['id']] = self.parse_tool_options(tool)
                     debug_print("** self.HEX_OPTIONS:", self.HEX_OPTIONS)
 
+        self.FILEINFO = {}
+        FILEINFO = {}
+        fileInfos = config_node.findall('.//fileInfo')
+        for fileInfo in fileInfos:
+            FILEINFO_DICT = {k:v for k,v in fileInfo.attrib.items()}  # copy atributes
+            temp_dict = dict(FILEINFO_DICT=FILEINFO_DICT)
+
+            COMPILER_OPTIONS = {}
+            LINKER_OPTIONS = {}
+            # parse fileInfo/tool
+            for tool in fileInfo.findall('./tool'):
+                tool_id_temp = tool.attrib['id'].lower()
+                if "compiler" in tool_id_temp:
+                    COMPILER_OPTIONS[tool.attrib['id']] = self.parse_tool_options(tool)
+                    debug_print("** fileInfo.COMPILER_OPTIONS:", COMPILER_OPTIONS)
+                if "linker" in tool_id_temp:
+                    LINKER_OPTIONS[tool.attrib['id']] = self.parse_tool_options(tool)
+                    debug_print("** fileInfo.LINKER_OPTIONS:", LINKER_OPTIONS)
+            temp_dict['COMPILER_OPTIONS'] = COMPILER_OPTIONS
+            temp_dict['LINKER_OPTIONS'] = LINKER_OPTIONS
+            FILEINFO[fileInfo.attrib['resourcePath']] = temp_dict
+        self.FILEINFO = FILEINFO
+        debug_print(FILEINFO)
+
     @staticmethod
-    def parse_tool_options(tool_node) -> Dict:
+    def parse_tool_options(tool_node, tag_select_str:str = './option') -> Dict:
         tool_options = {}
-        for option in tool_node.findall('./option'):
+        for option in tool_node.findall(tag_select_str):
             opt_key = option.attrib['id'].split('.')[-2]
             opt_val = option.attrib.get('value', None)
             if opt_val:
@@ -95,6 +125,7 @@ class cdt_project:
     PROJECT_NAME = 'unkown_project'
     configs = {}
     SRCS = []
+    RESOURCE_MAP = {}
     variable_dict0 = []
     variable_dict = []
     project_xml = None
@@ -121,7 +152,7 @@ class cdt_project:
         self.PROJECT_NAME = self._get_project_name()
         self._gether_vaiable()
         self.configs = self._get_configs()
-        self.SRCS = self._get_srcs()
+        self.SRCS, self.RESOURCE_MAP = self._get_srcs()
 
     def _get_project_name(self) -> str:
         project_xml = self._get_project_xml()
@@ -131,13 +162,16 @@ class cdt_project:
     def _get_srcs(self) -> List[str]:
         project_xml = self._get_project_xml()
         srcs = []
-        linked_resources = project_xml.find("./linkedResources")
+        resource_map = {}
+        linked_resources = project_xml.find("./linkedResources") or []
         for resource in linked_resources:
+            name = resource.find('name').text.strip()
             uri = resource.find('locationURI')
             file_path = self.expand_variable(uri.text.strip())
             file_path = normalize_path(file_path)
             srcs.append(file_path)
-        return srcs
+            resource_map[name] = file_path
+        return srcs, resource_map
 
     def _get_configs(self) -> Dict:
         cproject_filepath = os.path.join(self.PROJECT_DIR, ".cproject")
@@ -253,11 +287,17 @@ class cmake_generator:
         outfile.write('\n')
         outfile.write(f'project({current_target_name})\n')
 
-        outfile.write('\n')
-        outfile.write('set(CG_TOOL_ROOT "C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.1.LTS")\n')
-
-        outfile.write('\n')
-        outfile.write('add_compile_options(-v28 -ml -mt --cla_support=cla1 --float_support=fpu32 --tmu_support=tmu0 --vcu_support=vcu2 -O0 --fp_mode=relaxed)\n')
+        # print(config_info.TOOLCHAIN_OPTIONS.get('OPT_CODEGEN_VERSION_DICT'))
+        # print(config_info.TARGETPLATFORM.get('superClass'))
+        if config_info.TARGETPLATFORM.get('superClass'):
+            OPT_CODEGEN_VERSION = config_info.TOOLCHAIN_OPTIONS.get('OPT_CODEGEN_VERSION')
+            if OPT_CODEGEN_VERSION is None:
+                OPT_CODEGEN_VERSION = 'unknown_version'
+            if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
+                    outfile.write('\n')
+                    outfile.write(f'set(CG_TOOL_ROOT "C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_{OPT_CODEGEN_VERSION}")\n')
+                    outfile.write('\n')
+                    outfile.write('add_compile_options(-v28 -ml -mt --cla_support=cla1 --float_support=fpu32 --tmu_support=tmu0 --vcu_support=vcu2 -O0 --fp_mode=relaxed)\n')
 
         SRC_FILES = self.get_src_files(config, current_target_name)
 
@@ -324,6 +364,29 @@ class cmake_generator:
                     outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC")
                     outfile.write(''.join(outstrlist))
                     outfile.write('\n)\n')
+
+            for file_resource_path, file_options in config_info.FILEINFO.items():
+                # print(file_resource_path, file_options)
+                outstrlist = []
+                file_path = self.cdt_prj.RESOURCE_MAP.get(file_resource_path)
+                if file_path is None:
+                    continue
+                tool_options = file_options.get('COMPILER_OPTIONS') or {}
+                for file_tool_id, file_tool_options in tool_options.items():
+                    # print(file_tool_options)
+                    for item in (file_tool_options.get('symbols_SUBITEMS') or []):
+                        item_val = item['value']
+                        item_str = self.expand_variable(item_val)
+                        outstrlist.append(f"{item_str}")
+                    for item in (file_tool_options.get('DEFINE_SUBITEMS') or []):
+                        item_val = item['value']
+                        item_str = self.expand_variable(item_val)
+                        outstrlist.append(f"{item_str}")
+                if len(outstrlist) > 0:
+                    outfile.write(f"\nset_source_files_properties({file_path} PROPERTIES COMPILE_DEFINITIONS\n")
+                    outfile.write('\t"')
+                    outfile.write(';'.join(outstrlist).replace('"', '\\"'))
+                    outfile.write('"\n)\n')
 
             #
         #
