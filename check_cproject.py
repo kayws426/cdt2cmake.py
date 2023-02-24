@@ -17,10 +17,14 @@ def normalize_path(path: str):
     if path[0] == '"' and path[-1] == '"' and path.count('"') == 2:
         path = path[1:-1]
     path = path.replace('\\', '/')
-    path = path.replace('//', '/')
-    path = path.replace('/./', '/')
-    if path.startswith('./'):
+    while '//' in path:
+        path = path.replace('//', '/')
+    while '/./' in path:
+        path = path.replace('/./', '/')
+    while path.startswith('./'):
         path = path[2:]
+    while path.endswith('/.'):
+        path = path[0:-2]
     if ' ' in path:
         path = f'"{path}"'
     return path
@@ -333,7 +337,7 @@ class cmake_generator:
                     outstrlist.append(f"\n\t{item_str}")
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC")
-                    outfile.write(''.join(outstrlist))
+                    outfile.write(''.join(map(normalize_path, outstrlist)))
                     outfile.write('\n)\n')
 
             for tool_id, tool_options in config_info.LINKER_OPTIONS.items():
@@ -348,7 +352,7 @@ class cmake_generator:
                     outstrlist.append(f"\n\t{item_str}")
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC")
-                    outfile.write(''.join(outstrlist))
+                    outfile.write(''.join(map(normalize_path, outstrlist)))
                     outfile.write('\n)\n')
 
                 outstrlist = []
@@ -362,7 +366,7 @@ class cmake_generator:
                     outstrlist.append(f"\n\t{item_str}")
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC")
-                    outfile.write(''.join(outstrlist))
+                    outfile.write(''.join(map(normalize_path, outstrlist)))
                     outfile.write('\n)\n')
 
             for file_resource_path, file_options in config_info.FILEINFO.items():
