@@ -267,12 +267,14 @@ class cmake_generator:
         return text
     
     def get_src_files(self, config: config_info, current_target_name: str) -> List[str]:
+        config_info = config['config_info']
         start_dir = config['PROJECT_DIR']
         file_list = self.cdt_prj.SRCS
+        is_c2000 = 'C2000' in config_info.TARGETPLATFORM.get('superClass')
         # start walk dir into start_dir and gether files with ['.c', '.asm'] extention
         for root, dirs, files in os.walk(start_dir):
             for file in files:
-                if file.endswith('.c') or file.endswith('.asm'):
+                if file.endswith('.c') or file.endswith('.asm') or (is_c2000 and file.endswith('.cmd')):
                     if "CMake" not in file and "CompilerId." not in file:
                         file_path = os.path.join(root, file)
                         file_path = normalize_path(file_path)
@@ -290,6 +292,10 @@ class cmake_generator:
 
         outfile.write('\n')
         outfile.write(f'project({current_target_name})\n')
+        outfile.write('\n')
+        outfile.write("if(CMAKE_TOOLCHAIN_FILE)\n")
+        outfile.write("\tinclude(${CMAKE_TOOLCHAIN_FILE})\n")
+        outfile.write("endif(CMAKE_TOOLCHAIN_FILE)\n")
 
         # print(config_info.TOOLCHAIN_OPTIONS.get('OPT_CODEGEN_VERSION_DICT'))
         # print(config_info.TARGETPLATFORM.get('superClass'))
@@ -298,10 +304,12 @@ class cmake_generator:
             if OPT_CODEGEN_VERSION is None:
                 OPT_CODEGEN_VERSION = 'unknown_version'
             if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
-                    outfile.write('\n')
-                    outfile.write(f'set(CG_TOOL_ROOT "C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_{OPT_CODEGEN_VERSION}")\n')
-                    outfile.write('\n')
-                    outfile.write('add_compile_options(-v28 -ml -mt --cla_support=cla1 --float_support=fpu32 --tmu_support=tmu0 --vcu_support=vcu2 -O0 --fp_mode=relaxed)\n')
+                outfile.write('\n')
+                outfile.write("if(NOT CMAKE_TOOLCHAIN_FILE)\n")
+                outfile.write('\tadd_compile_options(-v28 -ml -mt --cla_support=cla1 --float_support=fpu32 --tmu_support=tmu0 --vcu_support=vcu2 -O0 --fp_mode=relaxed)\n')
+                outfile.write("endif(NOT CMAKE_TOOLCHAIN_FILE)\n")
+                outfile.write('\n')
+                outfile.write(f'set(CG_TOOL_ROOT "C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_{OPT_CODEGEN_VERSION}")\n')
 
         SRC_FILES = self.get_src_files(config, current_target_name)
 
@@ -316,28 +324,28 @@ class cmake_generator:
                 for item in (tool_options.get('symbols_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"\n\t{item_str}")
+                    outstrlist.append(f"{item_str}")
                 for item in (tool_options.get('DEFINE_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"\n\t{item_str}")
+                    outstrlist.append(f"{item_str}")
                 if len(outstrlist) > 0:
-                    outfile.write(f"\ntarget_compile_definitions({current_target_name} PUBLIC")
-                    outfile.write(''.join(outstrlist))
+                    outfile.write(f"\ntarget_compile_definitions({current_target_name} PUBLIC\n\t")
+                    outfile.write('\n\t'.join(outstrlist))
                     outfile.write('\n)\n')
 
                 outstrlist = []
                 for item in (tool_options.get('paths_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"\n\t{item_str}")
+                    outstrlist.append(f"{item_str}")
                 for item in (tool_options.get('INCLUDE_PATH_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"\n\t{item_str}")
+                    outstrlist.append(f"{item_str}")
                 if len(outstrlist) > 0:
-                    outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC")
-                    outfile.write(''.join(map(normalize_path, outstrlist)))
+                    outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC\n\t")
+                    outfile.write('\n\t'.join(map(normalize_path, outstrlist)))
                     outfile.write('\n)\n')
 
             for tool_id, tool_options in config_info.LINKER_OPTIONS.items():
@@ -345,28 +353,36 @@ class cmake_generator:
                 for item in (tool_options.get('paths_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"\n\t{item_str}")
+                    outstrlist.append(f"{item_str}")
                 for item in (tool_options.get('SEARCH_PATH_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"\n\t{item_str}")
+                    outstrlist.append(f"{item_str}")
                 if len(outstrlist) > 0:
-                    outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC")
-                    outfile.write(''.join(map(normalize_path, outstrlist)))
+                    outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC\n\t")
+                    outfile.write('\n\t'.join(map(normalize_path, outstrlist)))
                     outfile.write('\n)\n')
 
                 outstrlist = []
                 for item in (tool_options.get('input_SUBITEMS') or []):
                     item_val = item['value']
-                    item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"\n\t{item_str}")
+                    item_str = normalize_path(self.expand_variable(item_val))
+                    outstrlist.append(f"{item_str}")
                 for item in (tool_options.get('LIBRARY_SUBITEMS') or []):
                     item_val = item['value']
-                    item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"\n\t{item_str}")
+                    item_str = normalize_path(self.expand_variable(item_val))
+                    outstrlist.append(f"{item_str}")
+                if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
+                    if "libc.a" in outstrlist:
+                        outstrlist.remove("libc.a")
+                        outstrlist.append("./libc.a  # HACK: this maybe try search for libc.a in library path")
+                for item in filter(lambda s: s.endswith(".cmd"), SRC_FILES):
+                    item_val = f"${{CMAKE_CURRENT_LIST_DIR}}/{item}"
+                    item_str = normalize_path(self.expand_variable(item_val))
+                    outstrlist.append(f"{item_str}")
                 if len(outstrlist) > 0:
-                    outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC")
-                    outfile.write(''.join(map(normalize_path, outstrlist)))
+                    outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC\n\t")
+                    outfile.write('\n\t'.join(outstrlist))
                     outfile.write('\n)\n')
 
             for file_resource_path, file_options in config_info.FILEINFO.items():
@@ -391,6 +407,12 @@ class cmake_generator:
                     outfile.write('\t"')
                     outfile.write(';'.join(outstrlist).replace('"', '\\"'))
                     outfile.write('"\n)\n')
+
+            if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
+                outfile.write('\n')
+                outfile.write("if (COMMAND mark_as_target_executable)\n")
+                outfile.write("\tmark_as_target_executable(DUAL_CPU)\n")
+                outfile.write("endif(COMMAND mark_as_target_executable)\n")
 
             #
         #
