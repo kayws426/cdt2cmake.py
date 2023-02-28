@@ -6,6 +6,7 @@ import sys
 from typing import List, Set, Tuple, Dict
 import xml.etree.ElementTree as elemTree
 from lxml import objectify
+from pathlib import Path
 
 __version__ = "0.0.2"
 
@@ -13,8 +14,33 @@ def debug_print(msg, *args):
     return # print(msg, *args)
 
 
-def normalize_path(path: str):
+def unquote_path(path: str) -> str:
+    path = str(path)
     if path[0] == '"' and path[-1] == '"' and path.count('"') == 2:
+        path = path[1:-1]
+    return path
+
+
+def quote_path(path: str, force=False) -> str:
+    path = str(path)
+    if force or (path[0] != '"' and ' ' in path):
+        path = f'"{path}"'
+    return path
+
+
+def path_from_dir_item(path: str) -> str:
+    return quote_path(path)
+
+
+def path_from_file_item(path: str) -> str:
+    return quote_path(path)
+
+
+def norm_path0(path: str):
+    is_quoted = False
+
+    if path[0] == '"' and path[-1] == '"' and path.count('"') == 2:
+        is_quoted = True
         path = path[1:-1]
     path = path.replace('\\', '/')
     while '//' in path:
@@ -23,10 +49,29 @@ def normalize_path(path: str):
         path = path.replace('/./', '/')
     while path.startswith('./'):
         path = path[2:]
-    while path.endswith('/.'):
-        path = path[0:-2]
-    if ' ' in path:
+    while path.endswith('/') or path.endswith('/.'):
+        if path.endswith('/'):
+            path = path[0:-1]
+        if path.endswith('/.'):
+            path = path[0:-2]
+    if is_quoted and ' ' in path:
         path = f'"{path}"'
+
+    return path
+
+
+def norm_path(pathstr: str) -> str:
+    path = Path(pathstr).as_posix()
+    if path[0] == '"' and path[-1] == '"' and path.count('"') == 2 and ' ' not in path:
+        path = path[1:-1]
+
+    # if path[0] != '"' and ' ' in path:
+    #     path = f'"{path}"'
+
+    pth = norm_path0(str(pathstr))
+    if path != pth:
+        print("%s\t%s\t%s" % (pathstr, path, pth))
+
     return path
 
 
@@ -138,20 +183,20 @@ class cdt_project:
 
     def _get_project_xml(self):
         if self.project_xml is None:
-            project_filepath = os.path.join(self.PROJECT_DIR, ".project")
+            project_filepath = Path(self.PROJECT_DIR, ".project")
             self.project_xml = elemTree.parse(project_filepath)
         return self.project_xml
 
     def _get_cproject_xml(self):
         if self.cproject_xml is None:
-            cproject_filepath = os.path.join(self.PROJECT_DIR, ".cproject")
+            cproject_filepath = Path(self.PROJECT_DIR, ".cproject")
             self.cproject_xml = elemTree.parse(cproject_filepath)
         return self.cproject_xml
 
     def __init__(self, PROJECT_DIR: str, WORKSPACE_DIR: str = None):
-        WORKSPACE_DIR = WORKSPACE_DIR or os.path.join(PROJECT_DIR, '..')
-        self.PROJECT_DIR = normalize_path(PROJECT_DIR)
-        self.WORKSPACE_DIR = normalize_path(WORKSPACE_DIR)
+        WORKSPACE_DIR = WORKSPACE_DIR or Path(PROJECT_DIR, '..')
+        self.PROJECT_DIR = norm_path(PROJECT_DIR)
+        self.WORKSPACE_DIR = norm_path(WORKSPACE_DIR)
         #
         self.PROJECT_NAME = self._get_project_name()
         self._gether_vaiable()
@@ -172,14 +217,13 @@ class cdt_project:
             name = resource.find('name').text.strip()
             uri = resource.find('locationURI')
             file_path = self.expand_variable(uri.text.strip())
-            file_path = normalize_path(file_path)
+            file_path = norm_path(file_path)
             srcs.append(file_path)
             resource_map[name] = file_path
         return srcs, resource_map
 
     def _get_configs(self) -> Dict:
-        cproject_filepath = os.path.join(self.PROJECT_DIR, ".cproject")
-        cproject_xml = elemTree.parse(cproject_filepath)
+        cproject_xml = self._get_cproject_xml()
 
         configs = {}
         config_nodes = cproject_xml.findall(".//storageModule[@moduleId='cdtBuildSystem']/configuration[@name]")
@@ -201,9 +245,9 @@ class cdt_project:
         if len(self.variable_dict0) == 0:
             self.variable_dict0 = {}
             for N in range(1, 21):
-                PARENT_N_PROJECT_LOC = normalize_path(os.path.join(self.PROJECT_DIR, '.', '../' * N))
+                PARENT_N_PROJECT_LOC = norm_path(Path(self.PROJECT_DIR, '.', '../' * N))
                 self.variable_dict0[f'PARENT-{N}-PROJECT_LOC'] = PARENT_N_PROJECT_LOC
-                PARENT_N_WORKSPACE_LOC = normalize_path(os.path.join(self.WORKSPACE_DIR, '.', '../' * N))
+                PARENT_N_WORKSPACE_LOC = norm_path(Path(self.WORKSPACE_DIR, '.', '../' * N))
                 self.variable_dict0[f'PARENT-{N}-WORKSPACE_LOC'] = PARENT_N_WORKSPACE_LOC
 
         if len(self.variable_dict) == 0:
@@ -217,8 +261,10 @@ class cdt_project:
             # debug_print('variable_dict', self.variable_dict)
 
     def expand_variable(self, text: str) -> str:
+        is_quoted = False
         if text[0] == '"' and text[-1] == '"' and text.count('"') == 2:
             text = text[1:-1]
+            is_quoted = True
 
         if '${workspace_loc:/${ProjName}' in text and text[-1] == '}':
             text = text[0:-1].replace('${workspace_loc:/${ProjName}', '${PROJECT_LOC}')
@@ -234,6 +280,9 @@ class cdt_project:
         for k,v in self.variable_dict.items():
             text = text.replace(f'${{{k}}}', v)
             text = text.replace(k, v)
+
+        if is_quoted:
+            text = f'"{text}"'
 
         return text
 
@@ -276,8 +325,8 @@ class cmake_generator:
             for file in files:
                 if file.endswith('.c') or file.endswith('.asm') or (is_c2000 and file.endswith('.cmd')):
                     if "CMake" not in file and "CompilerId." not in file:
-                        file_path = os.path.join(root, file)
-                        file_path = normalize_path(file_path)
+                        file_path = Path(root, file)
+                        file_path = norm_path(file_path)
                         file_list.append(file_path)
         return file_list
 
@@ -288,7 +337,7 @@ class cmake_generator:
         config_info = config['config_info']
         current_target_name = config['PROJECT_NAME']
 
-        outfile.write('cmake_minimum_required(VERSION 3.5)\n')
+        outfile.write('cmake_minimum_required(VERSION 3.8)\n')
 
         outfile.write('\n')
         outfile.write(f'project({current_target_name})\n')
@@ -316,6 +365,8 @@ class cmake_generator:
         if SRC_FILES is not None and len(SRC_FILES) > 0:
             outfile.write(f'\nadd_executable({current_target_name}')
             for src_file in SRC_FILES:
+                src_file = norm_path(self.expand_variable(src_file))
+                src_file = path_from_file_item(src_file)
                 outfile.write(f"\n\t{src_file}")
             outfile.write('\n)\n')
 
@@ -337,49 +388,50 @@ class cmake_generator:
                 outstrlist = []
                 for item in (tool_options.get('paths_SUBITEMS') or []):
                     item_val = item['value']
-                    item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"{item_str}")
+                    item_str = norm_path(self.expand_variable(item_val))
+                    outstrlist.append(path_from_dir_item(item_str))
                 for item in (tool_options.get('INCLUDE_PATH_SUBITEMS') or []):
                     item_val = item['value']
-                    item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"{item_str}")
+                    item_str = norm_path(self.expand_variable(item_val))
+                    outstrlist.append(path_from_dir_item(item_str))
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC\n\t")
-                    outfile.write('\n\t'.join(map(normalize_path, outstrlist)))
+                    outfile.write('\n\t'.join(outstrlist))
                     outfile.write('\n)\n')
 
             for tool_id, tool_options in config_info.LINKER_OPTIONS.items():
                 outstrlist = []
                 for item in (tool_options.get('paths_SUBITEMS') or []):
                     item_val = item['value']
-                    item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"{item_str}")
+                    item_str = norm_path(self.expand_variable(item_val))
+                    outstrlist.append(path_from_dir_item(item_str))
                 for item in (tool_options.get('SEARCH_PATH_SUBITEMS') or []):
                     item_val = item['value']
-                    item_str = self.expand_variable(item_val)
-                    outstrlist.append(f"{item_str}")
+                    item_str = norm_path(self.expand_variable(item_val))
+                    outstrlist.append(path_from_dir_item(item_str))
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC\n\t")
-                    outfile.write('\n\t'.join(map(normalize_path, outstrlist)))
+                    outfile.write('\n\t'.join(outstrlist))
                     outfile.write('\n)\n')
 
                 outstrlist = []
                 for item in (tool_options.get('input_SUBITEMS') or []):
                     item_val = item['value']
-                    item_str = normalize_path(self.expand_variable(item_val))
-                    outstrlist.append(f"{item_str}")
+                    item_str = norm_path(self.expand_variable(item_val))
+                    outstrlist.append(path_from_file_item(item_str))
                 for item in (tool_options.get('LIBRARY_SUBITEMS') or []):
                     item_val = item['value']
-                    item_str = normalize_path(self.expand_variable(item_val))
-                    outstrlist.append(f"{item_str}")
+                    item_str = norm_path(self.expand_variable(item_val))
+                    outstrlist.append(path_from_file_item(item_str))
                 if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
-                    if "libc.a" in outstrlist:
-                        outstrlist.remove("libc.a")
-                        outstrlist.append("./libc.a  # HACK: this maybe try search for libc.a in library path")
+                    for item in outstrlist:
+                        if "libc.a" in item:
+                            outstrlist.remove(item)
+                            outstrlist.append("./libc.a # HACK: (TI-Compiler) This is a way to attempt searching for libc.a in the library path.")
                 for item in filter(lambda s: s.endswith(".cmd"), SRC_FILES):
                     item_val = f"${{CMAKE_CURRENT_LIST_DIR}}/{item}"
-                    item_str = normalize_path(self.expand_variable(item_val))
-                    outstrlist.append(f"{item_str}")
+                    item_str = norm_path(self.expand_variable(item_val))
+                    outstrlist.append(path_from_file_item(item_str))
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC\n\t")
                     outfile.write('\n\t'.join(outstrlist))
