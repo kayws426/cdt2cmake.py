@@ -8,10 +8,10 @@ import xml.etree.ElementTree as elemTree
 from lxml import objectify
 from pathlib import Path
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 def debug_print(msg, *args):
-    return # print(msg, *args)
+    return  # print(msg, *args)
 
 
 def unquote_path(path: str) -> str:
@@ -36,42 +36,10 @@ def path_from_file_item(path: str) -> str:
     return quote_path(path)
 
 
-def norm_path0(path: str):
-    is_quoted = False
-
-    if path[0] == '"' and path[-1] == '"' and path.count('"') == 2:
-        is_quoted = True
-        path = path[1:-1]
-    path = path.replace('\\', '/')
-    while '//' in path:
-        path = path.replace('//', '/')
-    while '/./' in path:
-        path = path.replace('/./', '/')
-    while path.startswith('./'):
-        path = path[2:]
-    while path.endswith('/') or path.endswith('/.'):
-        if path.endswith('/'):
-            path = path[0:-1]
-        if path.endswith('/.'):
-            path = path[0:-2]
-    if is_quoted and ' ' in path:
-        path = f'"{path}"'
-
-    return path
-
-
 def norm_path(pathstr: str) -> str:
     path = Path(pathstr).as_posix()
     if path[0] == '"' and path[-1] == '"' and path.count('"') == 2 and ' ' not in path:
         path = path[1:-1]
-
-    # if path[0] != '"' and ' ' in path:
-    #     path = f'"{path}"'
-
-    pth = norm_path0(str(pathstr))
-    if path != pth:
-        print("%s\t%s\t%s" % (pathstr, path, pth))
-
     return path
 
 
