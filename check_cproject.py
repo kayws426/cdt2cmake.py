@@ -183,7 +183,11 @@ class cdt_project:
         linked_resources = project_xml.find("./linkedResources") or []
         for resource in linked_resources:
             name = resource.find('name').text.strip()
+            type = int(resource.find('type').text.strip())
             uri = resource.find('locationURI')
+            uri = resource.find('location') if uri is None else uri
+            if uri is None or type != 1:
+                continue
             file_path = self.expand_variable(uri.text.strip())
             file_path = norm_path(file_path)
             srcs.append(file_path)
