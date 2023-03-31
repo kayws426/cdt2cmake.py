@@ -312,7 +312,7 @@ class cmake_generator:
         outfile.write('cmake_minimum_required(VERSION 3.8)\n')
 
         outfile.write('\n')
-        outfile.write(f'project({current_target_name})\n')
+        outfile.write(f'project({current_target_name} C CXX ASM)\n')
         outfile.write('\n')
         outfile.write("if(CMAKE_TOOLCHAIN_FILE)\n")
         outfile.write("\tinclude(${CMAKE_TOOLCHAIN_FILE})\n")
@@ -435,7 +435,7 @@ class cmake_generator:
             if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
                 outfile.write('\n')
                 outfile.write("if (COMMAND mark_as_target_executable)\n")
-                outfile.write("\tmark_as_target_executable(DUAL_CPU)\n")
+                outfile.write(f"\tmark_as_target_executable({current_target_name})\n")
                 outfile.write("endif(COMMAND mark_as_target_executable)\n")
 
             #
