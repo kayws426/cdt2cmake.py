@@ -401,8 +401,10 @@ class cmake_generator:
                             outstrlist.remove(item)
                             outstrlist.append("./libc.a # HACK: (TI-Compiler) This is a way to attempt searching for libc.a in the library path.")
                 for item in filter(lambda s: s.endswith(".cmd"), SRC_FILES):
-                    item_val = f"${{CMAKE_CURRENT_LIST_DIR}}/{item}"
+                    item_val = item
                     item_str = norm_path(self.expand_variable(item_val))
+                    if not Path(item_str).is_absolute():
+                        item_str = f"${{CMAKE_CURRENT_LIST_DIR}}/{item_str}"
                     outstrlist.append(path_from_file_item(item_str))
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC\n\t")
