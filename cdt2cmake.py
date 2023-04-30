@@ -311,13 +311,6 @@ class cmake_generator:
 
         outfile.write('cmake_minimum_required(VERSION 3.8)\n')
 
-        outfile.write('\n')
-        outfile.write(f'project({current_target_name} C CXX ASM)\n')
-        outfile.write('\n')
-        outfile.write("if(CMAKE_TOOLCHAIN_FILE)\n")
-        outfile.write("\tinclude(${CMAKE_TOOLCHAIN_FILE})\n")
-        outfile.write("endif(CMAKE_TOOLCHAIN_FILE)\n")
-
         # print(config_info.TOOLCHAIN_OPTIONS.get('OPT_CODEGEN_VERSION_DICT'))
         # print(config_info.TARGETPLATFORM.get('superClass'))
         if config_info.TARGETPLATFORM.get('superClass'):
@@ -325,12 +318,58 @@ class cmake_generator:
             if OPT_CODEGEN_VERSION is None:
                 OPT_CODEGEN_VERSION = 'unknown_version'
             if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
-                outfile.write('\n')
-                outfile.write("if(NOT CMAKE_TOOLCHAIN_FILE)\n")
-                outfile.write('\tadd_compile_options(-v28 -ml -mt --cla_support=cla1 --float_support=fpu32 --tmu_support=tmu0 --vcu_support=vcu2 -O0 --fp_mode=relaxed)\n')
-                outfile.write("endif(NOT CMAKE_TOOLCHAIN_FILE)\n")
+                c2000_opt_dict = {}
+                c2000_opt_lines = []
+                for tool_id, tool_options in config_info.COMPILER_OPTIONS.items():
+                    c2000_opt_dict['LARGE_MEMORY_MODEL'] = (tool_options.get('LARGE_MEMORY_MODEL') or "true") == 'true'
+                    c2000_opt_dict['UNIFIED_MEMORY'] = (tool_options.get('UNIFIED_MEMORY') or "true") == 'true'
+                    c2000_opt_dict['SILICON_VERSION'] = (tool_options.get('SILICON_VERSION') or "SILICON_VERSION.28").split('.')[-1]
+                    c2000_opt_dict['FLOAT_SUPPORT'] = (tool_options.get('FLOAT_SUPPORT') or "FLOAT_SUPPORT.fpu32").split('.')[-1]
+                    c2000_opt_dict['CLA_SUPPORT'] = (tool_options.get('CLA_SUPPORT') or "CLA_SUPPORT.cla1").split('.')[-1]
+                    c2000_opt_dict['VCU_SUPPORT'] = (tool_options.get('VCU_SUPPORT') or "VCU_SUPPORT.vcu2").split('.')[-1]
+                    c2000_opt_dict['TMU_SUPPORT'] = (tool_options.get('TMU_SUPPORT') or "TMU_SUPPORT.tmu0").split('.')[-1]
+                    if tool_options.get('OPT_LEVEL') is not None:
+                        c2000_opt_dict['OPT_LEVEL'] = (tool_options.get('OPT_LEVEL') or "OPT_LEVEL.0").split('.')[-1]
+                    if tool_options.get('OPT_FOR_SPEED') is not None:
+                        c2000_opt_dict['OPT_FOR_SPEED'] = (tool_options.get('OPT_FOR_SPEED') or "OPT_FOR_SPEED.2").split('.')[-1]
+                    c2000_opt_dict['FP_MODE'] = (tool_options.get('FP_MODE') or "FP_MODE.relaxed").split('.')[-1]
+                    for k, v in c2000_opt_dict.items():
+                        if v is True:
+                            c2000_opt_lines.append("--{0}".format(k.lower()))
+                        else:
+                            c2000_opt_lines.append("--{0}={1}".format(k.lower(), str(v).lower()))
+                    # end of for loop
+                # end of for loop
+                if len(c2000_opt_lines) > 0:
+                    outfile.write('\nset(CMAKE_C2000_DEFAULT_COMPILE_FLAGS "{0}" CACHE STRING "")'.format(' '.join(c2000_opt_lines)))
+
+                c2000_linker_opt_dict = {}
+                c2000_linker_opt_lines = []
+                for tool_id, tool_options in config_info.LINKER_OPTIONS.items():
+                    if tool_options.get('STACK_SIZE') is not None:
+                        c2000_linker_opt_dict['STACK_SIZE'] = (tool_options.get('STACK_SIZE') or "0x400")
+                    if tool_options.get('HEAP_SIZE') is not None:
+                        c2000_linker_opt_dict['HEAP_SIZE'] = (tool_options.get('HEAP_SIZE') or "0x400")
+                    for k, v in c2000_linker_opt_dict.items():
+                        if v is True:
+                            c2000_linker_opt_lines.append("--{0}".format(k.lower()))
+                        else:
+                            c2000_linker_opt_lines.append("--{0}={1}".format(k.lower(), str(v).lower()))
+                    # end of for loop
+                # end of for loop
+                if len(c2000_linker_opt_lines) > 0:
+                    outfile.write('\nset(CMAKE_C2000_LINKER_STACK_SIZE_HEAP_SIZE_FLAGS "{0}" CACHE STRING "")'.format(' '.join(c2000_linker_opt_lines)))
+
                 outfile.write('\n')
                 outfile.write(f'set(CG_TOOL_ROOT "C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_{OPT_CODEGEN_VERSION}")\n')
+                outfile.write('set(TI_CGT_C2000_DIR ${CG_TOOL_ROOT} CACHE STRING "")\n')
+
+        outfile.write('\n')
+        outfile.write(f'project({current_target_name} C CXX ASM)\n')
+        outfile.write('\n')
+        outfile.write("if(CMAKE_TOOLCHAIN_FILE)\n")
+        outfile.write("\tinclude(${CMAKE_TOOLCHAIN_FILE})\n")
+        outfile.write("endif(CMAKE_TOOLCHAIN_FILE)\n")
 
         SRC_FILES = self.get_src_files(config, current_target_name)
 
