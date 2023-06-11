@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import io
 import os
@@ -295,7 +295,7 @@ class cmake_generator:
         # start walk dir into start_dir and gether files with ['.c', '.asm'] extention
         for root, dirs, files in os.walk(start_dir):
             for file in files:
-                if file.endswith('.c') or file.endswith('.asm') or (is_c2000 and file.endswith('.cmd')):
+                if file.endswith('.c') or file.endswith('.cla') or file.endswith('.asm') or (is_c2000 and file.endswith('.cmd')):
                     if "CMake" not in file and "CompilerId." not in file:
                         file_path = Path(root, file)
                         file_path = norm_path(file_path)
