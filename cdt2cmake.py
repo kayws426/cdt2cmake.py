@@ -116,6 +116,18 @@ class config_info:
         self.FILEINFO = FILEINFO
         debug_print(FILEINFO)
 
+        self.EXCLUDE_INFO = []
+        EXCLUDE_INFO = []
+        sourceEntries = config_node.findall('.//sourceEntries')
+        for sourceEntry in sourceEntries:
+            entries = config_node.findall('.//entry')
+            for entry in entries:
+                ei_item = {k:v for k,v in entry.attrib.items()}  # copy atributes
+                ei_item['exclude_item_list'] = ei_item.get('excluding','').replace(';', '|').split('|')
+                EXCLUDE_INFO.append(ei_item)
+        self.EXCLUDE_INFO = EXCLUDE_INFO
+        debug_print(EXCLUDE_INFO)
+
     @staticmethod
     def parse_tool_options(tool_node, tag_select_str:str = './option') -> Dict:
         tool_options = {}
@@ -490,6 +502,11 @@ class cmake_generator:
                     else:
                         item_str = norm_path(self.expand_variable(item))
                         outstrlist.append(item)
+                # process exclude list
+                for exclude_info in config_info.EXCLUDE_INFO:
+                    for exclude_item in exclude_info['exclude_item_list']:
+                        if len(exclude_item) > 0:
+                            outstrlist = list(filter(lambda x: not x.endswith(exclude_item), outstrlist))
                 if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
                     libc_found = False
                     for item in outstrlist:
