@@ -8,7 +8,7 @@ import xml.etree.ElementTree as elemTree
 from lxml import objectify
 from pathlib import Path
 
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 
 def debug_print(msg, *args):
     return  # print(msg, *args)
@@ -186,12 +186,15 @@ class cdt_project:
             type = int(resource.find('type').text.strip())
             uri = resource.find('locationURI')
             uri = resource.find('location') if uri is None else uri
-            if uri is None or type != 1:
-                continue
-            file_path = self.expand_variable(uri.text.strip())
-            file_path = norm_path(file_path)
-            srcs.append(file_path)
-            resource_map[name] = file_path
+            if uri is not None:
+                resource_map[name] = uri
+                if type == 1:
+                    file_path = self.expand_variable(uri.text.strip())
+                    file_path = norm_path(file_path)
+                    srcs.append(file_path)
+                if type == 2:
+                    uri = self.expand_variable(uri.text.strip())
+                    srcs.append('@linkedResources://' + uri)
         return srcs, resource_map
 
     def _get_configs(self) -> Dict:
@@ -272,7 +275,7 @@ class cmake_generator:
 
     def gether_vaiable(self, config: config_info) -> None:
         if self.variable_dict is None:
-            self.variable_dict ={}
+            self.variable_dict = {}
             # self.variable_dict['${ProjName}'] = config['PROJECT_NAME']
             # self.variable_dict['${workspace_loc}'] = config['PROJECT_DIR'] + '/..'
             # self.variable_dict['${PROJECT_ROOT}'] = config['PROJECT_DIR']
@@ -286,20 +289,63 @@ class cmake_generator:
             text = text.replace(k, v)
 
         return text
-    
-    def get_src_files(self, config: config_info, current_target_name: str) -> List[str]:
+
+    def get_src_files(self, config: config_info, current_target_name: str, search_dir_arg: str = None) -> List[str]:
         config_info = config['config_info']
-        start_dir = config['PROJECT_DIR']
-        file_list = self.cdt_prj.SRCS
+        if search_dir_arg is None:
+            search_dir_arg = config['PROJECT_DIR']
         is_c2000 = 'C2000' in config_info.TARGETPLATFORM.get('superClass')
-        # start walk dir into start_dir and gether files with ['.c', '.asm'] extention
-        for root, dirs, files in os.walk(start_dir):
-            for file in files:
-                if file.endswith('.c') or file.endswith('.cla') or file.endswith('.asm') or (is_c2000 and file.endswith('.cmd')):
-                    if "CMake" not in file and "CompilerId." not in file:
-                        file_path = Path(root, file)
-                        file_path = norm_path(file_path)
-                        file_list.append(file_path)
+
+        # file_list = self.cdt_prj.SRCS
+        file_list = []
+        search_dirs = [search_dir_arg]
+
+        for uri in self.cdt_prj.SRCS:
+            if uri.startswith('@linkedResources://'):
+                uri_dir = uri[len('@linkedResources://'):]
+                search_dirs.append(uri_dir)
+            else:
+                search_dirs.append(uri)
+
+        for search_dir in search_dirs:
+            # start walk dir into search_dir and gether files with ['.c', '.asm'] extention
+            for root, dirs, files in os.walk(search_dir):
+                for file in files:
+                    if file.endswith('.c') or file.endswith('.cla') or file.endswith('.asm') or (is_c2000 and file.endswith('.cmd')):
+                        if "CMake" not in file and "CompilerId." not in file:
+                            file_path = Path(root, file)
+                            file_path = norm_path(file_path)
+                            file_list.append(file_path)
+                            debug_print(file_path)
+        return file_list
+
+    def get_lib_files(self, config: config_info, current_target_name: str, search_dir_arg: str = None) -> List[str]:
+        config_info = config['config_info']
+        if search_dir_arg is None:
+            search_dir_arg = config['PROJECT_DIR']
+        is_c2000 = 'C2000' in config_info.TARGETPLATFORM.get('superClass')
+
+        # file_list = self.cdt_prj.SRCS
+        file_list = []
+        search_dirs = [search_dir_arg]
+
+        for uri in self.cdt_prj.SRCS:
+            if uri.startswith('@linkedResources://'):
+                uri_dir = uri[len('@linkedResources://'):]
+                search_dirs.append(uri_dir)
+            else:
+                search_dirs.append(uri)
+
+        for search_dir in search_dirs:
+            # start walk dir into search_dir and gether files with ['.a', '.lib'] extention
+            for root, dirs, files in os.walk(search_dir):
+                for file in files:
+                    if file.endswith('.a') or file.endswith('.lib') or (is_c2000 and file.endswith('.cmd')):
+                        if "CMake" not in file and "CompilerId." not in file:
+                            file_path = Path(root, file)
+                            file_path = norm_path(file_path)
+                            file_list.append(file_path)
+                            debug_print(file_path)
         return file_list
 
     def generate(self, config_name: str, outfile) -> None:
@@ -372,6 +418,7 @@ class cmake_generator:
         outfile.write("endif(CMAKE_TOOLCHAIN_FILE)\n")
 
         SRC_FILES = self.get_src_files(config, current_target_name)
+        LIB_FILES = self.get_lib_files(config, current_target_name)
 
         if SRC_FILES is not None and len(SRC_FILES) > 0:
             outfile.write(f'\nadd_executable({current_target_name}')
@@ -434,17 +481,24 @@ class cmake_generator:
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
                     outstrlist.append(path_from_file_item(item_str))
-                for item in filter(lambda s: s.endswith(".cmd"), SRC_FILES):
-                    item_val = item
-                    item_str = norm_path(self.expand_variable(item_val))
-                    if not Path(item_str).is_absolute():
-                        item_str = f"${{CMAKE_CURRENT_LIST_DIR}}/{item_str}"
-                    outstrlist.append(path_from_file_item(item_str))
+                for item in LIB_FILES:
+                    if item.endswith(".cmd"):
+                        item_str = norm_path(self.expand_variable(item))
+                        if not Path(item_str).is_absolute():
+                            item_str = f"${{CMAKE_CURRENT_LIST_DIR}}/{item_str}"
+                        outstrlist.append(path_from_file_item(item_str))
+                    else:
+                        item_str = norm_path(self.expand_variable(item))
+                        outstrlist.append(item)
                 if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
+                    libc_found = False
                     for item in outstrlist:
                         if "libc.a" in item:
-                            outstrlist.remove(item)
-                            outstrlist.append("./libc.a # HACK: (TI-Compiler) This is a way to attempt searching for libc.a in the library path.")
+                            libc_found = True
+                            break
+                    if libc_found:
+                        outstrlist = list(filter(lambda item: "libc.a" not in item, outstrlist))
+                        outstrlist.append("./libc.a # HACK: (TI-Compiler) This is a way to attempt searching for libc.a in the library path.")
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC\n\t")
                     outfile.write('\n\t'.join(outstrlist))
