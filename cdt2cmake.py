@@ -317,7 +317,9 @@ class cmake_generator:
                 uri_dir = uri[len('@linkedResources://'):]
                 search_dirs.append(uri_dir)
             else:
-                search_dirs.append(uri)
+                file = uri
+                if file.endswith('.c') or file.endswith('.cla') or file.endswith('.asm') or (is_c2000 and file.endswith('.cmd')):
+                    file_list.append(file)
 
         for search_dir in search_dirs:
             # start walk dir into search_dir and gether files with ['.c', '.asm'] extention
@@ -346,7 +348,9 @@ class cmake_generator:
                 uri_dir = uri[len('@linkedResources://'):]
                 search_dirs.append(uri_dir)
             else:
-                search_dirs.append(uri)
+                file = uri
+                if file.endswith('.a') or file.endswith('.lib') or (is_c2000 and file.endswith('.cmd')):
+                    file_list.append(file)
 
         for search_dir in search_dirs:
             # start walk dir into search_dir and gether files with ['.a', '.lib'] extention
