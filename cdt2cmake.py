@@ -371,7 +371,7 @@ class cmake_generator:
         config_info = config['config_info']
         current_target_name = config['PROJECT_NAME']
 
-        outfile.write('cmake_minimum_required(VERSION 3.8)\n')
+        outfile.write('cmake_minimum_required(VERSION 3.18)\n')
 
         # print(config_info.TOOLCHAIN_OPTIONS.get('OPT_CODEGEN_VERSION_DICT'))
         # print(config_info.TARGETPLATFORM.get('superClass'))
