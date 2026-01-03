@@ -8,7 +8,7 @@ import xml.etree.ElementTree as elemTree
 from lxml import objectify
 from pathlib import Path
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 def debug_print(msg, *args):
     return  # print(msg, *args)
@@ -26,14 +26,6 @@ def quote_path(path: str, force=False) -> str:
     if force or (path[0] != '"' and ' ' in path):
         path = f'"{path}"'
     return path
-
-
-def path_from_dir_item(path: str) -> str:
-    return quote_path(path)
-
-
-def path_from_file_item(path: str) -> str:
-    return quote_path(path)
 
 
 def norm_path(pathstr: str) -> str:
@@ -302,6 +294,16 @@ class cmake_generator:
 
         return text
 
+    def path_from_dir_item(self, path: str) -> str:
+        if path.startswith(self.cdt_prj.PROJECT_DIR):
+            path = path.replace(self.cdt_prj.PROJECT_DIR, '${PROJECT_DIR}')
+        return quote_path(path)
+
+    def path_from_file_item(self, path: str) -> str:
+        if path.startswith(self.cdt_prj.PROJECT_DIR):
+            path = path.replace(self.cdt_prj.PROJECT_DIR, '${PROJECT_DIR}')
+        return quote_path(path)
+
     def get_src_files(self, config: config_info, current_target_name: str, search_dir_arg: str = None) -> List[str]:
         config_info = config['config_info']
         if search_dir_arg is None:
@@ -429,6 +431,8 @@ class cmake_generator:
         outfile.write('\n')
         outfile.write(f'project({current_target_name} C CXX ASM)\n')
         outfile.write('\n')
+        outfile.write(f'set(PROJECT_DIR ${{CMAKE_CURRENT_LIST_DIR}}/{quote_path(self.cdt_prj.PROJECT_DIR)})\n')
+        outfile.write('\n')
         outfile.write("if(CMAKE_TOOLCHAIN_FILE)\n")
         outfile.write("\tinclude(${CMAKE_TOOLCHAIN_FILE})\n")
         outfile.write("endif(CMAKE_TOOLCHAIN_FILE)\n")
@@ -440,7 +444,7 @@ class cmake_generator:
             outfile.write(f'\nadd_executable({current_target_name}')
             for src_file in SRC_FILES:
                 src_file = norm_path(self.expand_variable(src_file))
-                src_file = path_from_file_item(src_file)
+                src_file = self.path_from_file_item(src_file)
                 outfile.write(f"\n\t{src_file}")
             outfile.write('\n)\n')
 
@@ -463,11 +467,11 @@ class cmake_generator:
                 for item in (tool_options.get('paths_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
-                    outstrlist.append(path_from_dir_item(item_str))
+                    outstrlist.append(self.path_from_dir_item(item_str))
                 for item in (tool_options.get('INCLUDE_PATH_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
-                    outstrlist.append(path_from_dir_item(item_str))
+                    outstrlist.append(self.path_from_dir_item(item_str))
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC\n\t")
                     outfile.write('\n\t'.join(outstrlist))
@@ -478,11 +482,11 @@ class cmake_generator:
                 for item in (tool_options.get('paths_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
-                    outstrlist.append(path_from_dir_item(item_str))
+                    outstrlist.append(self.path_from_dir_item(item_str))
                 for item in (tool_options.get('SEARCH_PATH_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
-                    outstrlist.append(path_from_dir_item(item_str))
+                    outstrlist.append(self.path_from_dir_item(item_str))
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC\n\t")
                     outfile.write('\n\t'.join(outstrlist))
@@ -492,17 +496,17 @@ class cmake_generator:
                 for item in (tool_options.get('input_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
-                    outstrlist.append(path_from_file_item(item_str))
+                    outstrlist.append(self.path_from_file_item(item_str))
                 for item in (tool_options.get('LIBRARY_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
-                    outstrlist.append(path_from_file_item(item_str))
+                    outstrlist.append(self.path_from_file_item(item_str))
                 for item in LIB_FILES:
                     if item.endswith(".cmd"):
                         item_str = norm_path(self.expand_variable(item))
                         if not Path(item_str).is_absolute():
                             item_str = f"${{CMAKE_CURRENT_LIST_DIR}}/{item_str}"
-                        outstrlist.append(path_from_file_item(item_str))
+                        outstrlist.append(self.path_from_file_item(item_str) + " # HACK: (TI-Compiler)")
                     else:
                         item_str = norm_path(self.expand_variable(item))
                         outstrlist.append(item)
