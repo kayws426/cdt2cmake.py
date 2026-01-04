@@ -425,17 +425,17 @@ class cmake_generator:
                     outfile.write('\nset(CMAKE_C2000_LINKER_STACK_SIZE_HEAP_SIZE_FLAGS "{0}" CACHE STRING "")'.format(' '.join(c2000_linker_opt_lines)))
 
                 outfile.write('\n')
-                outfile.write(f'set(CG_TOOL_ROOT "C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_{OPT_CODEGEN_VERSION}")\n')
-                outfile.write('set(TI_CGT_C2000_DIR ${CG_TOOL_ROOT} CACHE STRING "")\n')
+                outfile.write(f'set(CG_TOOL_ROOT_HINT "C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_{OPT_CODEGEN_VERSION}")\n')
+                # outfile.write('set(TI_CGT_C2000_DIR ${CG_TOOL_ROOT} CACHE STRING "")\n')
 
         outfile.write('\n')
         outfile.write(f'project({current_target_name} C CXX ASM)\n')
         outfile.write('\n')
         outfile.write(f'set(PROJECT_DIR ${{CMAKE_CURRENT_LIST_DIR}}/{quote_path(self.cdt_prj.PROJECT_DIR)})\n')
-        outfile.write('\n')
-        outfile.write("if(CMAKE_TOOLCHAIN_FILE)\n")
-        outfile.write("\tinclude(${CMAKE_TOOLCHAIN_FILE})\n")
-        outfile.write("endif(CMAKE_TOOLCHAIN_FILE)\n")
+        # outfile.write('\n')
+        # outfile.write("if(CMAKE_TOOLCHAIN_FILE)\n")
+        # outfile.write("\tinclude(${CMAKE_TOOLCHAIN_FILE})\n")
+        # outfile.write("endif(CMAKE_TOOLCHAIN_FILE)\n")
 
         SRC_FILES = self.get_src_files(config, current_target_name)
         LIB_FILES = self.get_lib_files(config, current_target_name)
@@ -502,14 +502,8 @@ class cmake_generator:
                     item_str = norm_path(self.expand_variable(item_val))
                     outstrlist.append(self.path_from_file_item(item_str))
                 for item in LIB_FILES:
-                    if item.endswith(".cmd"):
-                        item_str = norm_path(self.expand_variable(item))
-                        if not Path(item_str).is_absolute():
-                            item_str = f"${{CMAKE_CURRENT_LIST_DIR}}/{item_str}"
-                        outstrlist.append(self.path_from_file_item(item_str) + " # HACK: (TI-Compiler)")
-                    else:
-                        item_str = norm_path(self.expand_variable(item))
-                        outstrlist.append(item)
+                    item_str = norm_path(self.expand_variable(item))
+                    outstrlist.append(self.path_from_file_item(item_str))
                 # process exclude list
                 for exclude_info in config_info.EXCLUDE_INFO:
                     for exclude_item in exclude_info['exclude_item_list']:
@@ -523,7 +517,7 @@ class cmake_generator:
                             break
                     if libc_found:
                         outstrlist = list(filter(lambda item: "libc.a" not in item, outstrlist))
-                        outstrlist.append("./libc.a # HACK: (TI-Compiler) This is a way to attempt searching for libc.a in the library path.")
+                        outstrlist.append("--library=libc.a # HACK: (TI-Compiler) This is a way to attempt searching for libc.a in the library path.")
                 if len(outstrlist) > 0:
                     outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC\n\t")
                     outfile.write('\n\t'.join(outstrlist))
@@ -553,6 +547,9 @@ class cmake_generator:
                     outfile.write('"\n)\n')
 
             if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
+                outfile.write('\n')
+                outfile.write('set(CMAKE_LIBRARY_PATH_FLAG "--search_path=")\n')
+                outfile.write('set(CMAKE_LINK_LIBRARY_FLAG "--library=")\n')
                 outfile.write('\n')
                 outfile.write("if (COMMAND mark_as_target_executable)\n")
                 outfile.write(f"\tmark_as_target_executable({current_target_name})\n")
