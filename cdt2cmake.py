@@ -388,15 +388,22 @@ class cmake_generator:
                     c2000_opt_dict['LARGE_MEMORY_MODEL'] = (tool_options.get('LARGE_MEMORY_MODEL') or "true") == 'true'
                     c2000_opt_dict['UNIFIED_MEMORY'] = (tool_options.get('UNIFIED_MEMORY') or "true") == 'true'
                     c2000_opt_dict['SILICON_VERSION'] = (tool_options.get('SILICON_VERSION') or "SILICON_VERSION.28").split('.')[-1]
-                    c2000_opt_dict['FLOAT_SUPPORT'] = (tool_options.get('FLOAT_SUPPORT') or "FLOAT_SUPPORT.fpu32").split('.')[-1]
-                    c2000_opt_dict['CLA_SUPPORT'] = (tool_options.get('CLA_SUPPORT') or "CLA_SUPPORT.cla1").split('.')[-1]
-                    c2000_opt_dict['VCU_SUPPORT'] = (tool_options.get('VCU_SUPPORT') or "VCU_SUPPORT.vcu2").split('.')[-1]
-                    c2000_opt_dict['TMU_SUPPORT'] = (tool_options.get('TMU_SUPPORT') or "TMU_SUPPORT.tmu0").split('.')[-1]
+                    if tool_options.get('FLOAT_SUPPORT') is not None:
+                        c2000_opt_dict['FLOAT_SUPPORT'] = (tool_options.get('FLOAT_SUPPORT') or "FLOAT_SUPPORT.fpu32").split('.')[-1]
+                    if tool_options.get('CLA_SUPPORT') is not None:
+                        c2000_opt_dict['CLA_SUPPORT'] = (tool_options.get('CLA_SUPPORT') or "CLA_SUPPORT.cla1").split('.')[-1]
+                    if tool_options.get('VCU_SUPPORT') is not None:
+                        c2000_opt_dict['VCU_SUPPORT'] = (tool_options.get('VCU_SUPPORT') or "VCU_SUPPORT.vcu2").split('.')[-1]
+                    if tool_options.get('TMU_SUPPORT') is not None:
+                        c2000_opt_dict['TMU_SUPPORT'] = (tool_options.get('TMU_SUPPORT') or "TMU_SUPPORT.tmu0").split('.')[-1]
                     if tool_options.get('OPT_LEVEL') is not None:
                         c2000_opt_dict['OPT_LEVEL'] = (tool_options.get('OPT_LEVEL') or "OPT_LEVEL.0").split('.')[-1]
                     if tool_options.get('OPT_FOR_SPEED') is not None:
                         c2000_opt_dict['OPT_FOR_SPEED'] = (tool_options.get('OPT_FOR_SPEED') or "OPT_FOR_SPEED.2").split('.')[-1]
-                    c2000_opt_dict['FP_MODE'] = (tool_options.get('FP_MODE') or "FP_MODE.relaxed").split('.')[-1]
+                    if tool_options.get('FP_MODE') is not None:
+                        c2000_opt_dict['FP_MODE'] = (tool_options.get('FP_MODE') or "FP_MODE.relaxed").split('.')[-1]
+                    if tool_options.get('CLA_SIGNED_COMPARE_WORKAROUND') is not None:
+                        c2000_opt_dict['CLA_SIGNED_COMPARE_WORKAROUND'] = (tool_options.get('CLA_SIGNED_COMPARE_WORKAROUND') or ".").split('.')[-1]
                     for k, v in c2000_opt_dict.items():
                         if v is True:
                             c2000_opt_lines.append("--{0}".format(k.lower()))
@@ -414,11 +421,11 @@ class cmake_generator:
                         c2000_linker_opt_dict['STACK_SIZE'] = (tool_options.get('STACK_SIZE') or "0x400")
                     if tool_options.get('HEAP_SIZE') is not None:
                         c2000_linker_opt_dict['HEAP_SIZE'] = (tool_options.get('HEAP_SIZE') or "0x400")
-                    for k, v in c2000_linker_opt_dict.items():
-                        if v is True:
-                            c2000_linker_opt_lines.append("--{0}".format(k.lower()))
-                        else:
-                            c2000_linker_opt_lines.append("--{0}={1}".format(k.lower(), str(v).lower()))
+                for k, v in c2000_linker_opt_dict.items():
+                    if v is True:
+                        c2000_linker_opt_lines.append("--{0}".format(k.lower()))
+                    else:
+                        c2000_linker_opt_lines.append("--{0}={1}".format(k.lower(), str(v).lower()))
                     # end of for loop
                 # end of for loop
                 if len(c2000_linker_opt_lines) > 0:
@@ -448,8 +455,8 @@ class cmake_generator:
                 outfile.write(f"\n\t{src_file}")
             outfile.write('\n)\n')
 
+            outstrlist = []
             for tool_id, tool_options in config_info.COMPILER_OPTIONS.items():
-                outstrlist = []
                 for item in (tool_options.get('symbols_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
@@ -458,12 +465,13 @@ class cmake_generator:
                     item_val = item['value']
                     item_str = self.expand_variable(item_val)
                     outstrlist.append(f"{item_str}")
-                if len(outstrlist) > 0:
-                    outfile.write(f"\ntarget_compile_definitions({current_target_name} PUBLIC\n\t")
-                    outfile.write('\n\t'.join(outstrlist))
-                    outfile.write('\n)\n')
+            if len(outstrlist) > 0:
+                outfile.write(f"\ntarget_compile_definitions({current_target_name} PUBLIC\n\t")
+                outfile.write('\n\t'.join(outstrlist))
+                outfile.write('\n)\n')
 
-                outstrlist = []
+            outstrlist = []
+            for tool_id, tool_options in config_info.COMPILER_OPTIONS.items():
                 for item in (tool_options.get('paths_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
@@ -472,13 +480,29 @@ class cmake_generator:
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
                     outstrlist.append(self.path_from_dir_item(item_str))
-                if len(outstrlist) > 0:
-                    outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC\n\t")
-                    outfile.write('\n\t'.join(outstrlist))
-                    outfile.write('\n)\n')
+            if len(outstrlist) > 0:
+                outfile.write(f"\ntarget_include_directories({current_target_name} PUBLIC\n\t")
+                outfile.write('\n\t'.join(outstrlist))
+                outfile.write('\n)\n')
 
+            outstrlist = []
+            for tool_id, tool_options in config_info.COMPILER_OPTIONS.items():
+                for item in (tool_options.get('DEFINE_SUBITEMS') or []):
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outstrlist.append(f"--define={item_str}")
             for tool_id, tool_options in config_info.LINKER_OPTIONS.items():
-                outstrlist = []
+                for item in (tool_options.get('DEFINE_SUBITEMS') or []):
+                    item_val = item['value']
+                    item_str = self.expand_variable(item_val)
+                    outstrlist.append(f"--define={item_str}")
+            if len(outstrlist) > 0:
+                outfile.write(f"\ntarget_link_options({current_target_name} PUBLIC\n\t")
+                outfile.write('\n\t'.join(outstrlist))
+                outfile.write('\n)\n')
+
+            outstrlist = []
+            for tool_id, tool_options in config_info.LINKER_OPTIONS.items():
                 for item in (tool_options.get('paths_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
@@ -487,12 +511,13 @@ class cmake_generator:
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
                     outstrlist.append(self.path_from_dir_item(item_str))
-                if len(outstrlist) > 0:
-                    outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC\n\t")
-                    outfile.write('\n\t'.join(outstrlist))
-                    outfile.write('\n)\n')
+            if len(outstrlist) > 0:
+                outfile.write(f"\ntarget_link_directories({current_target_name} PUBLIC\n\t")
+                outfile.write('\n\t'.join(outstrlist))
+                outfile.write('\n)\n')
 
-                outstrlist = []
+            outstrlist = []
+            for tool_id, tool_options in config_info.LINKER_OPTIONS.items():
                 for item in (tool_options.get('input_SUBITEMS') or []):
                     item_val = item['value']
                     item_str = norm_path(self.expand_variable(item_val))
@@ -504,28 +529,28 @@ class cmake_generator:
                 for item in LIB_FILES:
                     item_str = norm_path(self.expand_variable(item))
                     outstrlist.append(self.path_from_file_item(item_str))
-                # process exclude list
-                for exclude_info in config_info.EXCLUDE_INFO:
-                    for exclude_item in exclude_info['exclude_item_list']:
-                        if len(exclude_item) > 0:
-                            outstrlist = list(filter(lambda x: not x.endswith(exclude_item), outstrlist))
-                if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
-                    libc_found = False
-                    for item in outstrlist:
-                        if "libc.a" in item:
-                            libc_found = True
-                            break
-                    if libc_found:
-                        outstrlist = list(filter(lambda item: "libc.a" not in item, outstrlist))
-                        outstrlist.append("--library=libc.a # HACK: (TI-Compiler) This is a way to attempt searching for libc.a in the library path.")
-                if len(outstrlist) > 0:
-                    outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC\n\t")
-                    outfile.write('\n\t'.join(outstrlist))
-                    outfile.write('\n)\n')
+            # process exclude list
+            for exclude_info in config_info.EXCLUDE_INFO:
+                for exclude_item in exclude_info['exclude_item_list']:
+                    if len(exclude_item) > 0:
+                        outstrlist = list(filter(lambda x: not x.endswith(exclude_item), outstrlist))
+            if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
+                libc_found = False
+                for item in outstrlist:
+                    if "libc.a" in item:
+                        libc_found = True
+                        break
+                if libc_found:
+                    outstrlist = list(filter(lambda item: "libc.a" not in item, outstrlist))
+                    outstrlist.append("--library=libc.a # HACK: (TI-Compiler) This is a way to attempt searching for libc.a in the library path.")
+            if len(outstrlist) > 0:
+                outfile.write(f"\ntarget_link_libraries({current_target_name} PUBLIC\n\t")
+                outfile.write('\n\t'.join(outstrlist))
+                outfile.write('\n)\n')
 
+            outstrlist = []
             for file_resource_path, file_options in config_info.FILEINFO.items():
                 # print(file_resource_path, file_options)
-                outstrlist = []
                 file_path = self.cdt_prj.RESOURCE_MAP.get(file_resource_path)
                 if file_path is None:
                     continue
@@ -540,11 +565,11 @@ class cmake_generator:
                         item_val = item['value']
                         item_str = self.expand_variable(item_val)
                         outstrlist.append(f"{item_str}")
-                if len(outstrlist) > 0:
-                    outfile.write(f"\nset_source_files_properties({file_path} PROPERTIES COMPILE_DEFINITIONS\n")
-                    outfile.write('\t"')
-                    outfile.write(';'.join(outstrlist).replace('"', '\\"'))
-                    outfile.write('"\n)\n')
+            if len(outstrlist) > 0:
+                outfile.write(f"\nset_source_files_properties({file_path} PROPERTIES COMPILE_DEFINITIONS\n")
+                outfile.write('\t"')
+                outfile.write(';'.join(outstrlist).replace('"', '\\"'))
+                outfile.write('"\n)\n')
 
             if 'C2000' in config_info.TARGETPLATFORM.get('superClass'):
                 outfile.write('\n')
@@ -557,6 +582,9 @@ class cmake_generator:
 
             #
         #
+        outfile.write('\n')
+        outfile.write('# [EOF]')
+        outfile.write('\n')
 
 
 def main():
